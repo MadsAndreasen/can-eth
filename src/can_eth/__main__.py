@@ -8,15 +8,17 @@ import signal
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
+
 class Forwarder:
     def __init__(self, can_interface, ip_address, port):
         self.can_interface: str = can_interface
         self.ip_address = ip_address
         self.port = port
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 2)
 
     async def forward(self):
-        bus = can.interface.Bus(channel=self.can_interface, interface='socketcan')
+        bus = can.interface.Bus(channel=self.can_interface, interface="socketcan")
         loop = asyncio.get_event_loop()
         while True:
             try:
@@ -27,6 +29,7 @@ class Forwarder:
             except asyncio.CancelledError:
                 bus.shutdown()
                 break
+
 
 async def handle_sigint():
     loop = asyncio.get_event_loop()
@@ -59,7 +62,8 @@ def parse_args():
 def setup_parser():
     parser = argparse.ArgumentParser(description="CAN to Ethernet converter")
     parser.add_argument(
-        "-c", "--can-interface",
+        "-c",
+        "--can-interface",
         type=str,
         default="can0",
         help="CAN interface to listen to",
@@ -67,7 +71,7 @@ def setup_parser():
     parser.add_argument(
         "-i",
         type=str,
-        default="127.0.0.1",
+        default="239.255.0.1",
         help="IP address to send the CAN messages to",
     )
     parser.add_argument(
