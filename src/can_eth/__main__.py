@@ -1,5 +1,6 @@
 import argparse
 import logging
+import struct
 import can
 import socket
 import asyncio
@@ -25,7 +26,20 @@ class Forwarder:
                 message = await loop.run_in_executor(None, bus.recv)
                 if message:
                     logger.debug("Received message: %s", message)
-                    self.sock.sendto(message.data, (self.ip_address, self.port))
+                    # Extract CAN ID, DLC, and Data
+                    can_id = message.arbitration_id
+                    dlc = message.dlc
+                    data = message.data
+
+                    # PCAN-Ethernet Header (6 bytes)
+                    packet_type = 0x00    # CAN Frame
+                    channel = 0x01        # CAN Channel (1)
+                    flags = 0x02 if message.is_extended_id else 0x00  # Extended ID flag
+                    can_id_bytes = struct.pack(">I", can_id)  # Convert to big-endian 4 bytes
+
+                    # Construct the full PCAN-Ethernet CAN frame
+                    pcan_frame = struct.pack("BBB", packet_type, channel, dlc) + bytes([flags]) + can_id_bytes + data
+                    self.sock.sendto(pcan_frame, (self.ip_address, self.port))
             except asyncio.CancelledError:
                 bus.shutdown()
                 break
