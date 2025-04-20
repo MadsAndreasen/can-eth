@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "Forward CAN messages over Ethernet"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "python-can>=4.5.0",
-]
+dependencies = ["python-can>=4.5.0"]
+
+[dependency-groups]
+dev = ["pytest>=8.3.5", "pytest-asyncio>=0.25.3", "pytest-mock"]
+
+[tool.ruff]
+line-length = 130

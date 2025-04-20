@@ -26,23 +26,58 @@ class Forwarder:
                 message = await loop.run_in_executor(None, bus.recv)
                 if message:
                     logger.debug("Received message: %s", message)
-                    # Extract CAN ID, DLC, and Data
-                    can_id = message.arbitration_id
-                    dlc = message.dlc
-                    data = message.data
-
-                    # PCAN-Ethernet Header (6 bytes)
-                    packet_type = 0x00    # CAN Frame
-                    channel = 0x01        # CAN Channel (1)
-                    flags = 0x02 if message.is_extended_id else 0x00  # Extended ID flag
-                    can_id_bytes = struct.pack(">I", can_id)  # Convert to big-endian 4 bytes
-
-                    # Construct the full PCAN-Ethernet CAN frame
-                    pcan_frame = struct.pack("BBB", packet_type, channel, dlc) + bytes([flags]) + can_id_bytes + data
+                    pcan_frame = self.can_to_ethernet_bytes(message)
                     self.sock.sendto(pcan_frame, (self.ip_address, self.port))
             except asyncio.CancelledError:
                 bus.shutdown()
                 break
+
+    def can_to_ethernet_bytes(self, msg: can.Message) -> bytes:
+        """
+        Convert a python-can Message to PCAN-Gateway Ethernet frame (classic CAN 2.0 frame).
+
+        Returns:
+            bytes: Ethernet frame to be sent via UDP/TCP.
+        """
+        # Packet constants
+        MESSAGE_TYPE = 0x80  # classic CAN
+        TAG = b"\x00" * 8
+        TIMESTAMP_LOW = 0
+        TIMESTAMP_HIGH = 0
+        CHANNEL = 0x01  # usually ignored
+        DLC = msg.dlc
+        FLAGS = 0x00
+        if msg.is_remote_frame:
+            FLAGS |= 0x01
+        if msg.is_extended_id:
+            FLAGS |= 0x02
+
+        # Prepare ID
+        can_id = msg.arbitration_id & 0x1FFFFFFF
+        if msg.is_extended_id:
+            can_id |= 1 << 31  # extended flag
+        if msg.is_remote_frame:
+            can_id |= 1 << 30  # RTR bit
+
+        # CAN data must be exactly 8 bytes
+        data = msg.data + bytes(8 - len(msg.data))
+
+        # Construct full message
+        frame = struct.pack(
+            "!HH8sIIBBHI8s",
+            36,  # Total length of frame in bytes
+            MESSAGE_TYPE,  # Type: 0x80
+            TAG,  # Tag (unused)
+            TIMESTAMP_LOW,
+            TIMESTAMP_HIGH,
+            CHANNEL,
+            DLC,
+            FLAGS,
+            can_id,
+            data,
+        )
+
+        return frame
 
 
 async def handle_sigint():
