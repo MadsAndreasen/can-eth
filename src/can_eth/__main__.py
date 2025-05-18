@@ -6,11 +6,13 @@ import socket
 import asyncio
 import signal
 
+from can_eth.eth_to_can import EthToCAN
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
 
-class Forwarder:
+class CANToEth:
     def __init__(self, can_interface, ip_address, port):
         self.can_interface: str = can_interface
         self.ip_address = ip_address
@@ -80,6 +82,9 @@ class Forwarder:
         return frame
 
 
+
+
+
 async def handle_sigint():
     loop = asyncio.get_event_loop()
     stop_event = asyncio.Event()
@@ -93,14 +98,36 @@ async def handle_sigint():
 
 async def main():
     args = parse_args()
-    forwarder = Forwarder(args.can_interface, args.i, args.p)
-    forward_task = asyncio.create_task(forwarder.forward())
+
+    # Create tasks based on mode
+    tasks = []
+
+    # Create and start CAN to Ethernet task if needed
+    if args.mode in ["can2eth", "both"]:
+        can_to_eth = CANToEth(args.can_interface, args.i, args.p)
+        tasks.append(asyncio.create_task(can_to_eth.forward()))
+
+    # Create and start Ethernet to CAN task if needed
+    if args.mode in ["eth2can", "both"]:
+        eth_to_can = EthToCAN(args.can_interface, args.i, args.p)
+        tasks.append(asyncio.create_task(eth_to_can.forward()))
+
+    # Add signal handler
     sigint_task = asyncio.create_task(handle_sigint())
+    tasks.append(sigint_task)
 
-    await asyncio.wait([forward_task, sigint_task], return_when=asyncio.FIRST_COMPLETED)
+    # Wait for any task to complete (usually the sigint handler)
+    done, pending = await asyncio.wait(
+        tasks, return_when=asyncio.FIRST_COMPLETED
+    )
 
-    forward_task.cancel()
-    await forward_task
+    # Cancel all pending tasks
+    for task in pending:
+        task.cancel()
+
+    # Await all cancelled tasks to properly clean up
+    if pending:
+        await asyncio.wait(pending, return_when=asyncio.ALL_COMPLETED)
 
 
 def parse_args():
@@ -109,25 +136,33 @@ def parse_args():
 
 
 def setup_parser():
-    parser = argparse.ArgumentParser(description="CAN to Ethernet converter")
+    parser = argparse.ArgumentParser(description="CAN to/from Ethernet converter")
     parser.add_argument(
         "-c",
         "--can-interface",
         type=str,
         default="can0",
-        help="CAN interface to listen to",
+        help="CAN interface to use",
     )
     parser.add_argument(
         "-i",
         type=str,
         default="239.255.0.1",
-        help="IP address to send the CAN messages to",
+        help="IP address for multicast/unicast communication",
     )
     parser.add_argument(
         "-p",
         type=int,
-        default=5000,
-        help="Port to send the CAN messages to",
+        default=50001,
+        help="UDP port for communication",
+    )
+    parser.add_argument(
+        "-m",
+        "--mode",
+        type=str,
+        choices=["can2eth", "eth2can", "both"],
+        default="both",
+        help="Operation mode: CAN to Ethernet, Ethernet to CAN, or both",
     )
     return parser
 
